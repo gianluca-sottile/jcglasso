@@ -1,0 +1,15 @@
+bibentry(bibtype = "Article",
+  header       = "To cite jcglasso in publications use:",
+  title        = "Sparse inference of the human haematopoietic system from heterogeneous and partially observed genomic data",
+  author       = c(person(given = "Gianluca", family = "Sottile"),
+                   person(given = "Luigi", family = "Augugliaro"),
+                   person(given = "Veronica", family = "Vinciotti"),
+                   person(given = "Walter", family = "Arancio"),
+                   person(given = "Claudia", family = "Coronnello")),
+  journal      = "Journal of the Royal Statistical Society Series C: Applied Statistics",
+  year         = "2025",
+  volume       = "74",
+  number       = "1",
+  pages        = "204--228",
+  doi          = "10.1093/jrsssc/qlae052"
+)

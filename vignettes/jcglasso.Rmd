@@ -1,0 +1,134 @@
+---
+title: "Joint conditional graphical lasso with jcglasso"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Joint conditional graphical lasso with jcglasso}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 7, fig.height = 4)
+```
+
+```{r setup}
+library(jcglasso)
+```
+
+## 1. The model
+
+For each of `K` sub-populations (classes), the `q` predictors follow a Gaussian
+graphical model, $X_k \sim N(\mu_k, \Omega_k^{-1})$, and the `p` responses follow
+a conditional Gaussian graphical model,
+$Y_k \mid X_k = x \sim N(\beta_{0k} + B_k^\top x, \Theta_k^{-1})$.
+Responses and predictors can be censored (with known limits) or missing at
+random. The joint conditional graphical lasso (Sottile et al., 2025) maximizes the
+observed log-likelihood penalized by sparse group lasso penalties on
+$\{B_k\}$, $\{\Theta_k\}$ and $\{\Omega_k\}$, with tuning parameters
+$\lambda$, $\rho$ and $\nu$ and mixing parameters $\alpha_2$, $\alpha_1$ and
+$\alpha_3$ (lasso for $\alpha = 1$, group lasso for $\alpha = 0$).
+
+## 2. Data
+
+`rjcggm()` simulates data as in the simulation study of the paper: right-censored
+responses and missing values in responses and predictors.
+
+```{r data}
+set.seed(1234)
+sim <- rjcggm(n = 100, p = 10, q = 4, K = 2, ncompPrecision = 2, ncompB = 2)
+sim$Z
+summary(sim$Z)$class1
+```
+
+`datajcggm()` creates the same kind of object from a list of matrices of
+responses (and predictors), with censoring limits `lo` and `up` and `NA` for the
+missing values.
+
+## 3. Selection of the tuning parameters
+
+Following Section 6 of the paper, $\nu$ is first selected on the model of the
+predictors alone (`sim$ZX` contains the predictors as responses) with the BIC
+computed from the Q-function:
+
+```{r nu}
+fitx <- jcglasso(data = sim$ZX, nrho = 10, rho.min.ratio = 0.1)
+bicx <- BIC(fitx)
+plot(bicx)
+nu <- select_jcglasso(fitx, GoF = bicx)$rho
+nu
+```
+
+Then $\lambda$ and $\rho$ are selected on a two-dimensional grid, with $\nu$
+fixed:
+
+```{r fit}
+fit <- jcglasso(data = sim$Z, nrho = 5, rho.min.ratio = 0.1, nlambda = 5,
+                lambda.min.ratio = 0.1, nu = nu)
+fit
+bic <- BIC(fit)
+plot(bic)
+best <- select_jcglasso(fit, GoF = bic)
+```
+
+The optimality conditions of the M-step can be checked at the selected model:
+
+```{r kkt}
+kkt(best)
+```
+
+## 4. Maximum likelihood refit and estimates
+
+```{r mle}
+mle <- jcggm(best)
+round(coef(mle, type = "B", class.id = 1), 2)
+plot(mle, "Theta")
+```
+
+`impute()`, `fitted()` and `residuals()` give the imputed data (conditional
+expected values of the censored and missing values), the fitted values and the
+residuals.
+
+```{r impute}
+head(impute(mle)$class1[, 1:5])
+```
+
+## 5. Graphs
+
+With package 'igraph', `to_graph()` returns the estimated graphs of each class.
+
+```{r graphs, eval = requireNamespace("igraph", quietly = TRUE)}
+gr <- to_graph(mle)
+gr
+plot(gr, type = "conditional")
+```
+
+## 6. Computational notes
+
+* The EM algorithm alternates an E-step (conditional expected values of the
+  sufficient statistics, with the approximation of Guo et al. (2015) for the second
+  moments of censored values) and an M-step in which $\Omega$ is updated by the
+  joint graphical lasso, $B$ by an accelerated proximal gradient (APG) algorithm
+  and $\Theta$ by the joint graphical lasso.
+* The joint graphical lasso (ADMM of Danaher et al., 2014) is applied separately
+  to the connected components identified by the screening rule; isolated
+  variables have closed-form estimates.
+* For the regression coefficients, APG was compared with the ADMM described in
+  the paper (with penalty parameter $\tau = 2$) on simulated problems: both reach
+  the same solution, APG with 2-4 times fewer iterations and less computing time,
+  also with highly correlated responses.
+* The path is computed with warm starts; only the estimates, the values of the
+  Q-function and the degrees of freedom are stored.
+
+## References
+
+Sottile, G., Augugliaro, L., Vinciotti, V., Arancio, W. and Coronnello, C. (2025).
+Sparse inference of the human haematopoietic system from heterogeneous and
+partially observed genomic data. *Journal of the Royal Statistical Society Series
+C: Applied Statistics*, 74(1), 204-228.
+
+Danaher, P., Wang, P. and Witten, D. M. (2014). The joint graphical lasso for
+inverse covariance estimation across multiple classes. *Journal of the Royal
+Statistical Society Series B*, 76(2), 373-397.
+
+Guo, J., Levina, E., Michailidis, G. and Zhu, J. (2015). Graphical models for
+ordinal data. *Journal of Computational and Graphical Statistics*, 24(1), 183-204.

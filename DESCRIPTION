@@ -1,0 +1,44 @@
+Package: jcglasso
+Type: Package
+Title: Joint Conditional Graphical Lasso with Censored and Missing Values
+Version: 1.0.0
+Authors@R: c(
+    person("Gianluca", "Sottile", email = "gianluca.sottile@unipa.it",
+           role = c("aut", "cre"), comment = c(ORCID = "0000-0001-9347-7251")),
+    person("Luigi", "Augugliaro", email = "luigi.augugliaro@unipa.it", role = "aut",
+           comment = c(ORCID = "0000-0002-4603-7541")),
+    person("Veronica", "Vinciotti", email = "veronica.vinciotti@unitn.it", role = "aut",
+           comment = c(ORCID = "0000-0002-2625-7977")))
+Description: Joint conditional graphical lasso estimator for multiple
+    conditional Gaussian graphical models with censored and/or missing values,
+    as proposed in Sottile et al. (2025) <doi:10.1093/jrsssc/qlae052>. For each
+    of K sub-populations, the package estimates a sparse precision matrix of the
+    predictors, sparse regression coefficients and a sparse conditional precision
+    matrix of the responses, with group lasso penalties that encourage similar
+    structures across sub-populations. Estimation uses an EM algorithm with joint
+    graphical lasso (ADMM) and accelerated proximal gradient steps. Model
+    selection, maximum likelihood refitting, simulation of data and graph
+    representations of the fitted models are also provided.
+License: GPL (>= 2)
+URL: https://github.com/gianluca-sottile/jcglasso
+BugReports: https://github.com/gianluca-sottile/jcglasso/issues
+Depends:
+    R (>= 4.1.0)
+Imports:
+    graphics,
+    grDevices,
+    stats,
+    utils
+Suggests:
+    cglasso,
+    igraph,
+    knitr,
+    rmarkdown,
+    testthat (>= 3.0.0)
+VignetteBuilder: knitr
+NeedsCompilation: yes
+Config/testthat/edition: 3
+Encoding: UTF-8
+Language: en-US
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
