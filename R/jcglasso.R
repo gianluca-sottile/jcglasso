@@ -36,7 +36,9 @@
 #'   the model of the predictors alone (see the examples).
 #' @param alpha1,alpha2,alpha3 the mixing parameters in \eqn{[0, 1]} between the
 #'   lasso (`alpha = 1`) and the group lasso (`alpha = 0`) penalties of
-#'   \eqn{\Theta}, \eqn{B} and \eqn{\Omega}, respectively.
+#'   \eqn{\Theta}, \eqn{B} and \eqn{\Omega}, respectively (note that in Sottile et
+#'   al., 2025, \eqn{\alpha_1} refers to \eqn{B} and \eqn{\alpha_2} to
+#'   \eqn{\Theta}). With `K = 1` they are set to one.
 #' @param maxit.em,thr.em maximum number of iterations and tolerance of the EM
 #'   algorithm.
 #' @param maxit.bcd,thr.bcd maximum number of iterations and tolerance of the
@@ -59,8 +61,14 @@
 #' to the connected components of the screening rule), \eqn{B} given \eqn{\Theta}
 #' by an accelerated proximal gradient algorithm, and \eqn{\Theta} given \eqn{B} by
 #' the joint graphical lasso. The regression part of the objective function is
-#' scaled by one half, so that the smallest value of \eqn{\lambda} giving
-#' \eqn{B = 0} is \eqn{\max_{h,j}\{\sum_k (f_k |S_{xy,k}\Theta_k|_{hj})^2\}^{1/2}}.
+#' scaled by one half (\eqn{\lambda} corresponds to \eqn{\lambda/2} in the paper).
+#' By default, the largest value of \eqn{\lambda} is
+#' \eqn{\max_{h,j}\{\sum_k (f_k |S_{xy,k}\Theta_k|_{hj} / w_{hjk})^2\}^{1/2}}, a value
+#' large enough to give \eqn{B = 0} (the exact smallest such value for the lasso,
+#' `alpha2 = 1`, and the group lasso, `alpha2 = 0`); similarly for \eqn{\rho}
+#' (Danaher et al., 2014). Weights that differ across classes are used by the
+#' lasso part of the penalties; the group part uses, for each entry, the mean of
+#' the finite weights across classes.
 #'
 #' The path is computed for decreasing values of \eqn{\lambda} (outer loop) and
 #' \eqn{\rho} (inner loop), with warm starts. Only the estimated parameters are
@@ -138,7 +146,10 @@ jcglasso <- function(formula, data, diagonal = FALSE, weights.B = NULL, weights.
   wB <- if (q) make_weights(weights.B, c(q, p, K), list(xnames, ynames, Z$classes), "weights.B")
   wOmg <- if (q) make_weights(weights.Omega, c(q, q, K), list(xnames, xnames, Z$classes), "weights.Omega", diagonal,
                               square = TRUE)
-  if (!is.null(nu)) check_scalar(nu, "nu", 0, Inf)
+  if (!is.null(nu)) {
+    check_scalar(nu, "nu", 0, Inf)
+    if (q == 0L) warning(sQuote("nu"), " is ignored in models without predictors", call. = FALSE)
+  }
   grid <- list(nrho = nrho, rho = if (!missing(rho)) rho, rho.min.ratio = if (!missing(rho.min.ratio)) rho.min.ratio,
                nlambda = if (q) nlambda else 1L, lambda = if (!missing(lambda)) lambda,
                lambda.min.ratio = if (!missing(lambda.min.ratio)) lambda.min.ratio)
@@ -147,8 +158,11 @@ jcglasso <- function(formula, data, diagonal = FALSE, weights.B = NULL, weights.
   out <- jcglasso.fit(Z, diagonal = diagonal, wB = wB, wTht = wTht, wOmg = wOmg, grid = grid, nu = nu,
                       alpha1 = alpha1, alpha2 = alpha2, alpha3 = alpha3, maxit.em = maxit.em, thr.em = thr.em,
                       maxit.bcd = maxit.bcd, thr.bcd = thr.bcd, trace = trace)
-  if (any(out$conv != 0L))
-    warning("the algorithm did not converge for ", sum(out$conv != 0L), " of the fitted models", call. = FALSE)
+  if (any(out$conv == 1L))
+    warning("the EM algorithm did not converge for ", sum(out$conv == 1L), " of the fitted models", call. = FALSE)
+  if (any(out$conv == 2L))
+    warning("the algorithms of the M-step did not converge for ", sum(out$conv == 2L),
+            " of the fitted models: consider increasing 'maxit.bcd'", call. = FALSE)
   out$call <- this.call
   out$Z <- Z
   out$weights.B <- wB; out$weights.Tht <- wTht; out$weights.Omega <- wOmg
@@ -207,7 +221,7 @@ make_weights <- function(w, dims, dn, what, diagonal = FALSE, square = FALSE) {
   if (is.null(w)) {
     w <- array(1, dims, dn)
     if (square && !diagonal) for (k in seq_len(K)) diag(w[, , k]) <- 0
-    return(w)
+    return(w)   # double
   }
   if (is.list(w)) {
     if (length(w) != K) stop(sQuote(what), " must be a list of ", K, " matrices", call. = FALSE)
@@ -223,6 +237,7 @@ make_weights <- function(w, dims, dn, what, diagonal = FALSE, square = FALSE) {
                                                     " are not zero", call. = FALSE)
   }
   dimnames(w) <- dn
+  storage.mode(w) <- "double"
   w
 }
 

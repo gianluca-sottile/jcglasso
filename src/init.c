@@ -17,24 +17,25 @@ SEXP C_estep(SEXP Z, SEXP R, SEXP psi, SEXP Xi, SEXP lo, SEXP up, SEXP zlo, SEXP
     return out;
 }
 
-SEXP C_apg_B(SEXP B, SEXP Sxx, SEXP Sxy, SEXP Tht, SEXP f, SEXP lambda, SEXP alpha, SEXP w, SEXP maxit, SEXP thr)
+SEXP C_apg_B(SEXP B, SEXP Sxx, SEXP Sxy, SEXP Tht, SEXP f, SEXP lambda, SEXP alpha, SEXP w, SEXP gw, SEXP maxit,
+             SEXP thr)
 {
     const int *dim = INTEGER(getAttrib(B, R_DimSymbol));
     int q = dim[0], p = dim[1], K = dim[2], nit = 0;
     SEXP out = PROTECT(allocVector(VECSXP, 3)), Bn = PROTECT(duplicate(B));
     int conv = jcg_apg_B(q, p, K, REAL(Bn), REAL(Sxx), REAL(Sxy), REAL(Tht), REAL(f), asReal(lambda), asReal(alpha),
-                         REAL(w), asInteger(maxit), asReal(thr), &nit);
+                         REAL(w), REAL(gw), asInteger(maxit), asReal(thr), &nit);
     SET_VECTOR_ELT(out, 0, Bn); SET_VECTOR_ELT(out, 1, ScalarInteger(nit)); SET_VECTOR_ELT(out, 2, ScalarInteger(conv));
     UNPROTECT(2);
     return out;
 }
 
-SEXP C_jgl(SEXP S, SEXP f, SEXP rho, SEXP alpha, SEXP w, SEXP Tht, SEXP pendiag, SEXP maxit, SEXP thr)
+SEXP C_jgl(SEXP S, SEXP f, SEXP rho, SEXP alpha, SEXP w, SEXP gw, SEXP Tht, SEXP pendiag, SEXP maxit, SEXP thr)
 {
     const int *dim = INTEGER(getAttrib(S, R_DimSymbol));
     int p = dim[0], K = dim[2], nit = 0;
     SEXP out = PROTECT(allocVector(VECSXP, 4)), Tn = PROTECT(duplicate(Tht)), comp = PROTECT(allocVector(INTSXP, p));
-    int conv = jcg_jgl(p, K, REAL(S), REAL(f), asReal(rho), asReal(alpha), REAL(w), REAL(Tn), asInteger(pendiag),
+    int conv = jcg_jgl(p, K, REAL(S), REAL(f), asReal(rho), asReal(alpha), REAL(w), REAL(gw), REAL(Tn), asInteger(pendiag),
                        asInteger(maxit), asReal(thr), INTEGER(comp), &nit);
     SET_VECTOR_ELT(out, 0, Tn); SET_VECTOR_ELT(out, 1, comp); SET_VECTOR_ELT(out, 2, ScalarInteger(nit));
     SET_VECTOR_ELT(out, 3, ScalarInteger(conv));
@@ -44,8 +45,8 @@ SEXP C_jgl(SEXP S, SEXP f, SEXP rho, SEXP alpha, SEXP w, SEXP Tht, SEXP pendiag,
 
 static const R_CallMethodDef CallEntries[] = {
     {"C_estep", (DL_FUNC) &C_estep, 10},
-    {"C_apg_B", (DL_FUNC) &C_apg_B, 10},
-    {"C_jgl", (DL_FUNC) &C_jgl, 9},
+    {"C_apg_B", (DL_FUNC) &C_apg_B, 11},
+    {"C_jgl", (DL_FUNC) &C_jgl, 10},
     {NULL, NULL, 0}
 };
 

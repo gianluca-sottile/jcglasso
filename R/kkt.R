@@ -57,21 +57,24 @@ kkt <- function(object, lambda.id, rho.id) {
 }
 
 # Largest violation of the optimality conditions of sum_k g_k(x_k) + lam * SGL(x),
-# where G is the gradient of the smooth part.
-kkt_sgl <- function(x, G, lam, alpha, w, offdiag = FALSE) {
+# where G is the gradient of the smooth part (structural zeros are skipped).
+kkt_sgl <- function(x, G, lam, alpha, w, gw = group_weights(w), offdiag = FALSE) {
   K <- dim(x)[3L]
   nrm <- sqrt(apply(x^2, c(1L, 2L), sum))
   viol <- 0
   for (i in seq_len(dim(x)[1L])) for (j in seq_len(dim(x)[2L])) {
     if (offdiag && i == j) next
     wij <- w[i, j, ]
-    if (any(is.infinite(wij))) next
+    big <- !is.finite(wij) | wij >= BIG
+    g <- if (K > 1L) gw[i, j] else 0
     if (nrm[i, j] > 0) {
-      for (k in seq_len(K)) if (x[i, j, k] != 0)
+      for (k in seq_len(K)) if (!big[k] && x[i, j, k] != 0)
         viol <- max(viol, abs(G[i, j, k] + lam * alpha * wij[k] * sign(x[i, j, k]) +
-                                lam * (1 - alpha) * wij[k] * x[i, j, k] / nrm[i, j]))
-    } else {
-      ex <- sqrt(sum(pmax(abs(G[i, j, ]) - lam * alpha * wij, 0)^2)) - lam * (1 - alpha) * max(wij)
+                                lam * (1 - alpha) * g * x[i, j, k] / nrm[i, j]))
+      for (k in seq_len(K)) if (!big[k] && x[i, j, k] == 0)
+        viol <- max(viol, abs(G[i, j, k]) - lam * wij[k])
+    } else if (any(!big)) {
+      ex <- sqrt(sum(pmax(abs(G[i, j, !big]) - lam * alpha * wij[!big], 0)^2)) - lam * (1 - alpha) * g
       viol <- max(viol, ex)
     }
   }
@@ -82,7 +85,13 @@ kkt_prec <- function(Tht, S, f, rho, alpha, w, diagonal) {
   K <- dim(Tht)[3L]
   G <- Tht
   for (k in seq_len(K)) G[, , k] <- f[k] * (S[, , k] - solve(Tht[, , k]))
-  v <- kkt_sgl(Tht, G, rho, alpha, w, offdiag = TRUE)
-  if (!diagonal) v <- max(v, max(abs(vapply(seq_len(K), function(k) diag(G[, , k]), numeric(dim(Tht)[1L])))))
+  w[!is.finite(w)] <- BIG
+  gw <- group_weights(w)
+  v <- kkt_sgl(Tht, G, rho, alpha, w, gw, offdiag = TRUE)
+  # diagonal entries (positive): unpenalized, or penalized by the lasso part only
+  for (k in seq_len(K)) {
+    dg <- diag(G[, , k]) + if (diagonal) rho * alpha * diag(w[, , k]) else 0
+    v <- max(v, max(abs(dg)))
+  }
   v
 }

@@ -13,7 +13,10 @@
 #' @param ... further arguments passed to [select_jcglasso()].
 #' @return `to_graph()` returns an object of class `"jcglasso2igraph"`, a list
 #'   with components `Gyy`, `Gxy` and `Gxx` (lists of `K` graphs; `Gxy` and `Gxx`
-#'   are `NULL` without predictors). `getGraph()` returns a list of `K` graphs.
+#'   are `NULL` without predictors). `getGraph()` returns a list of `K` graphs;
+#'   the combined graphs (`"conditional"`, `"bipartite"`) are directed, with the
+#'   edge attribute `directed` equal to `FALSE` for the undirected edges of
+#'   \eqn{\Theta_k} and \eqn{\Omega_k}.
 #' @details Package 'igraph' is required.
 #' @seealso [jcglasso()]
 #' @examplesIf requireNamespace("igraph", quietly = TRUE)
@@ -83,7 +86,11 @@ getGraph.jcglasso2igraph <- function(x, type = c("Gyy", "Gxy", "Gxx", "condition
   if (type %in% c("Gyy", "Gxy", "Gxx")) return(x[[type]])
   out <- lapply(seq_along(x$Gyy), function(k) {
     gs <- if (type == "conditional") list(x$Gyy[[k]], x$Gxy[[k]]) else list(x$Gyy[[k]], x$Gxy[[k]], x$Gxx[[k]])
-    e <- do.call(rbind, lapply(gs, function(g) igraph::as_data_frame(g, what = "edges")[, c("from", "to"), drop = FALSE]))
+    e <- do.call(rbind, lapply(gs, function(g) {
+      d <- igraph::as_data_frame(g, what = "edges")[, c("from", "to"), drop = FALSE]
+      d$directed <- rep(igraph::is_directed(g), nrow(d))
+      d
+    }))
     v <- do.call(rbind, lapply(gs, function(g) igraph::as_data_frame(g, what = "vertices")[, c("name", "type"),
                                                                                          drop = FALSE]))
     v <- v[!duplicated(v$name), , drop = FALSE]
@@ -116,7 +123,9 @@ plot.jcglasso2igraph <- function(x, type, which, ...) {
   for (k in which) {
     g <- gr[[k]]
     col <- ifelse(igraph::V(g)$type == "predictor", "lightsalmon", "lightblue")
-    graphics::plot(g, vertex.color = col, edge.arrow.size = 0.3, main = names(gr)[k], ...)
+    am <- if (!is.null(igraph::E(g)$directed)) ifelse(igraph::E(g)$directed, 2, 0) else
+      if (igraph::is_directed(g)) 2 else 0
+    graphics::plot(g, vertex.color = col, edge.arrow.size = 0.3, edge.arrow.mode = am, main = names(gr)[k], ...)
   }
   invisible(x)
 }

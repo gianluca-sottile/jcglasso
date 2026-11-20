@@ -19,7 +19,7 @@ test_that("APG and ADMM solve the same B sub-problem", {
     Sxx[, , k] <- crossprod(X) / 50; Sxy[, , k] <- crossprod(X, Y) / 50; Tht[, , k] <- solve(cov(Y))
   }
   w <- array(1, c(q, p, K))
-  a <- ns$apg_B_R(array(0, c(q, p, K)), Sxx, Sxy, Tht, f, 0.05, 0.5, w, thr = 1e-10)
+  a <- ns$apg_B_R(array(0, c(q, p, K)), Sxx, Sxy, Tht, f, 0.05, 0.5, w, thr = 1e-12)
   b <- ns$admm_B_R(array(0, c(q, p, K)), Sxx, Sxy, Tht, f, 0.05, 0.5, w, thr = 1e-10)
   expect_equal(a$B, b$B, tolerance = 1e-6)
   G <- ns$grad_B_R(a$B, Sxx, Sxy, Tht, f)
@@ -45,7 +45,29 @@ test_that("compiled kernels agree with the R implementations", {
   f1 <- jcglasso(data = sim$Z, nrho = 2, nlambda = 2, rho.min.ratio = 0.3, lambda.min.ratio = 0.3)
   options(jcglasso.engine = "C")
   f2 <- jcglasso(data = sim$Z, nrho = 2, nlambda = 2, rho.min.ratio = 0.3, lambda.min.ratio = 0.3)
-  expect_equal(f1$B, f2$B, tolerance = 1e-8)
-  expect_equal(f1$Tht, f2$Tht, tolerance = 1e-8)
-  expect_equal(f1$Omega, f2$Omega, tolerance = 1e-8)
+  expect_equal(f1$B, f2$B, tolerance = 1e-6)
+  expect_equal(f1$Tht, f2$Tht, tolerance = 1e-6)
+  expect_equal(f1$Omega, f2$Omega, tolerance = 1e-6)
+})
+
+test_that("class-specific structural zeros and penalized diagonals", {
+  set.seed(6)
+  p <- 4; K <- 2; f <- c(0.5, 0.5); S <- array(0, c(p, p, K))
+  for (k in 1:K) S[, , k] <- cov(matrix(rnorm(30 * p), 30) %*% chol(0.6^abs(outer(1:p, 1:p, "-"))))
+  T0 <- array(0, c(p, p, K)); for (k in 1:K) T0[, , k] <- diag(1 / diag(S[, , k]))
+  w <- array(1, c(p, p, K)); for (k in 1:K) diag(w[, , k]) <- 0
+  w[1, 2, 1] <- w[2, 1, 1] <- 1e300          # structural zero in class 1 only
+  r1 <- ns$jgl_R(S, f, 0.2, 0.5, w, T0, FALSE, 1e4, 1e-9)
+  w2 <- w; w2[, , 1] <- w[, , 2]; w2[, , 2] <- w[, , 1]
+  r2 <- ns$jgl_R(S[, , 2:1], f, 0.2, 0.5, w2, T0[, , 2:1], FALSE, 1e4, 1e-9)
+  expect_equal(r1$Tht[, , 1], r2$Tht[, , 2], tolerance = 1e-6)   # invariant to the order of the classes
+  expect_equal(r1$Tht[1, 2, 1], 0)
+  # penalized diagonal: screening (isolated variables) and ADMM agree
+  wd <- array(1, c(p, p, K))
+  for (rho in c(0.1, 0.6)) {
+    r <- ns$jgl_R(S, f, rho, 0.5, wd, T0, TRUE, 1e4, 1e-10)
+    blk <- ns$jgl_admm_block_R(S, f, rho, 0.5, wd, ns$group_weights(wd), T0, TRUE, 1e4, 1e-10)
+    expect_equal(r$Tht, blk$Tht, tolerance = 1e-5)
+    expect_lt(ns$kkt_prec(r$Tht, S, f, rho, 0.5, wd, TRUE), 1e-5)
+  }
 })

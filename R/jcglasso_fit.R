@@ -32,6 +32,7 @@ jcglasso.fit <- function(Z, diagonal, wB, wTht, wOmg, grid, nu, alpha1, alpha2, 
   if (K == 1L) alpha1 <- alpha2 <- alpha3 <- 1
   wTht[is.infinite(wTht)] <- BIG
   if (q) { wB[is.infinite(wB)] <- BIG; wOmg[is.infinite(wOmg)] <- BIG }
+  gwTht <- group_weights(wTht); gwB <- if (q) group_weights(wB); gwOmg <- if (q) group_weights(wOmg)
 
   Zm <- lapply(seq_len(K), function(k) if (q) cbind(Z$Y[[k]], Z$X[[k]]) else Z$Y[[k]])
   zlo <- Z$zm - 3 * sqrt(Z$zv); zup <- Z$zm + 3 * sqrt(Z$zv)
@@ -65,10 +66,12 @@ jcglasso.fit <- function(Z, diagonal, wB, wTht, wOmg, grid, nu, alpha1, alpha2, 
     rho <- sort(grid$rho, decreasing = TRUE)
     if (any(rho < 0)) stop("negative values in ", sQuote("rho"), call. = FALSE)
   } else {
-    U <- upper.tri(diag(p))
-    g <- vapply(seq_len(K), function(k) f[k] * abs(S0[idY, idY, k][U]), numeric(sum(U)))
+    # a value large enough to give diagonal precision matrices (Danaher et al., 2014),
+    # taking the weights into account
+    U <- upper.tri(diag(p)) & gwTht > 0 & gwTht < BIG
+    g <- vapply(seq_len(K), function(k) f[k] * abs(S0[idY, idY, k][U]) / pmax(wTht[, , k][U], 1e-10), numeric(sum(U)))
     g <- matrix(g, ncol = K)
-    rho_max <- if (alpha1 < 1) max(sqrt(rowSums(g^2))) else max(g)
+    rho_max <- if (!length(g)) 1 else if (alpha1 < 1) max(sqrt(rowSums(g^2))) else max(g)
     rmr <- if (!is.null(grid$rho.min.ratio)) grid$rho.min.ratio else if (all(p < n)) 1e-2 else 5e-2
     check_scalar(rmr, "rho.min.ratio", 0, 1)
     check_int(grid$nrho, "nrho")
@@ -81,9 +84,12 @@ jcglasso.fit <- function(Z, diagonal, wB, wTht, wOmg, grid, nu, alpha1, alpha2, 
       lambda <- sort(grid$lambda, decreasing = TRUE)
       if (any(lambda < 0)) stop("negative values in ", sQuote("lambda"), call. = FALSE)
     } else {
-      G <- vapply(seq_len(K), function(k) f[k] * abs(S0[idX, idY, k] %*% Tht[, , k]), matrix(0, q, p))
+      G <- vapply(seq_len(K), function(k) f[k] * abs(S0[idX, idY, k] %*% Tht[, , k]) / pmax(wB[, , k], 1e-10),
+                  matrix(0, q, p))
       G <- array(G, c(q, p, K))
-      lambda_max <- if (alpha2 < 1) max(sqrt(apply(G^2, c(1L, 2L), sum))) else max(G)
+      ok <- gwB > 0 & gwB < BIG
+      G2 <- apply(G^2, c(1L, 2L), sum)
+      lambda_max <- if (!any(ok)) 1 else if (alpha2 < 1) max(sqrt(G2[ok])) else max(apply(G, c(1L, 2L), max)[ok])
       lmr <- if (!is.null(grid$lambda.min.ratio)) grid$lambda.min.ratio else if (all(q < n)) 1e-2 else 5e-2
       check_scalar(lmr, "lambda.min.ratio", 0, 1)
       check_int(grid$nlambda, "nlambda")
@@ -119,27 +125,28 @@ jcglasso.fit <- function(Z, diagonal, wB, wTht, wOmg, grid, nu, alpha1, alpha2, 
       rh <- max(rho[o], if (any(wTht >= BIG)) eps_pen else 0)
       nuo <- max(nuv[o], if (q && any(wOmg >= BIG)) eps_pen else 0)
       psi <- cur$psi; Tht <- cur$Tht; B <- cur$B; Omg <- cur$Omg
-      ninner <- 0L; code <- 1L
+      ninner <- 0L; code <- 1L; inner <- 0L
       for (it in seq_len(maxit.em)) {
-        Tht_o <- Tht; B_o <- B; Omg_o <- Omg
+        Tht_o <- Tht; B_o <- B; Omg_o <- Omg; inner <- 0L
         E <- estep_all(psi, Tht, B, Omg)
         psi <- E$psi; S <- E$S
         if (q) {
-          r <- k_jgl(S[idX, idX, , drop = FALSE], f, nuo, alpha3, wOmg, Omg, diagonal, maxit.bcd, thr.in)
-          Omg[] <- r$Tht; ninner <- ninner + r$nit
-          r <- k_apg(B, S[idX, idX, , drop = FALSE], S[idX, idY, , drop = FALSE], Tht, f, lam, alpha2, wB,
+          r <- k_jgl(S[idX, idX, , drop = FALSE], f, nuo, alpha3, wOmg, gwOmg, Omg, diagonal, maxit.bcd, thr.in)
+          Omg[] <- r$Tht; ninner <- ninner + r$nit; inner <- max(inner, r$conv)
+          r <- k_apg(B, S[idX, idX, , drop = FALSE], S[idX, idY, , drop = FALSE], Tht, f, lam, alpha2, wB, gwB,
                      maxit.bcd, thr.in)
-          B[] <- r$B; ninner <- ninner + r$nit
+          B[] <- r$B; ninner <- ninner + r$nit; inner <- max(inner, r$conv)
         }
         Sc <- array(0, c(p, p, K))
         for (k in seq_len(K)) Sc[, , k] <- S_cond(S[, , k], idY, idX, if (q) B[, , k])
-        r <- k_jgl(Sc, f, rh, alpha1, wTht, Tht, diagonal, maxit.bcd, thr.in)
-        Tht[] <- r$Tht; ninner <- ninner + r$nit
+        r <- k_jgl(Sc, f, rh, alpha1, wTht, gwTht, Tht, diagonal, maxit.bcd, thr.in)
+        Tht[] <- r$Tht; ninner <- ninner + r$nit; inner <- max(inner, r$conv)
         dlt <- max(rel_change(Tht, Tht_o, f), if (q) rel_change(B, B_o, f) else 0,
                    if (q) rel_change(Omg, Omg_o, f) else 0)
         if (trace == 2L) cat(sprintf("    EM step %4d: max relative change = %.3e\n", it, dlt))
         if (dlt <= thr.em) { code <- 0L; break }
       }
+      if (code == 0L && inner != 0L) code <- 2L
       # store the solution
       for (k in seq_len(K)) {
         if (q) {

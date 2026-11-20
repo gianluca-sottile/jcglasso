@@ -5,6 +5,7 @@ First submission of 'jcglasso', which implements the estimator of Sottile et al.
 
 ## Test environments
 
+(to be completed after the checks)
 * local macOS (aarch64), R release
 * GitHub Actions: macOS, Windows, Ubuntu (devel, release, oldrel-1)
 * win-builder (devel)

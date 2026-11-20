@@ -46,9 +46,10 @@ int jcg_estep(int n, int d, const double *Z, const int *R, const double *psi, co
               double *Zout, double *T1, double *T2);
 
 int jcg_apg_B(int q, int p, int K, double *B, const double *Sxx, const double *Sxy, const double *Tht,
-              const double *f, double lambda, double alpha, const double *w, int maxit, double thr, int *nit);
+              const double *f, double lambda, double alpha, const double *w, const double *gw, int maxit, double thr,
+              int *nit);
 
 int jcg_jgl(int p, int K, const double *S, const double *f, double rho, double alpha, const double *w,
-            double *Tht, int pendiag, int maxit, double thr, int *comp, int *nit);
+            const double *gw, double *Tht, int pendiag, int maxit, double thr, int *comp, int *nit);
 
 #endif

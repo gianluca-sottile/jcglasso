@@ -1,7 +1,9 @@
 /* Joint graphical lasso with group penalty (Danaher et al., 2014):
  *
  *   min sum_k f_k (tr(S_k Tht_k) - log det Tht_k)
- *       + rho [alpha sum_k sum_{i!=j} w_ijk |tht_ijk| + (1 - alpha) sum_{i!=j} (sum_k tht_ijk^2)^(1/2)]
+ *       + rho [alpha sum_k sum_{i!=j} w_ijk |tht_ijk| + (1 - alpha) sum_{i!=j} gw_ij (sum_k tht_ijk^2)^(1/2)]
+ *
+ * With pendiag = 1, the diagonal entries are penalized by the lasso part only.
  *
  * The variables are first split into connected components (Danaher et al., 2014,
  * Theorem 2); isolated variables have closed-form solutions, the other components
@@ -12,7 +14,7 @@
 #include "jcglasso.h"
 
 static int components(int p, int K, const double *S, const double *f, double rho, double alpha, const double *w,
-                      int *comp)
+                      const double *gw, int *comp)
 {
     int i, j, k, nc = 0;
     int *stack = jcg_alloc(p, int);
@@ -26,7 +28,7 @@ static int components(int p, int K, const double *S, const double *f, double rho
                 double v = f[k] * fabs(S[id]) - alpha * rho * w[id];
                 if (v > 0.0) s += v * v;
             }
-            adj[i + (size_t) p * j] = sqrt(s) > (1.0 - alpha) * rho * w[i + (size_t) p * j];
+            adj[i + (size_t) p * j] = sqrt(s) > (1.0 - alpha) * rho * gw[i + (size_t) p * j];
         }
     for (i = 0; i < p; i++) comp[i] = 0;
     for (i = 0; i < p; i++) {
@@ -46,7 +48,7 @@ static int components(int p, int K, const double *S, const double *f, double rho
 
 /* ADMM for one block of size m (arrays m x m x K) */
 static int admm_block(int m, int K, const double *S, const double *f, double rho, double alpha, const double *w,
-                      double *Tht, int pendiag, int maxit, double thr, int *nit)
+                      const double *gw, double *Tht, int pendiag, int maxit, double thr, int *nit)
 {
     size_t mm = (size_t) m * m, N = mm * K;
     int i, j, k, it, info, lwork = -1, conv = 1;
@@ -89,11 +91,13 @@ static int admm_block(int m, int K, const double *S, const double *f, double rho
                     v = v > t ? v - t : (v < -t ? v + t : 0.0);
                     Z[id] = v; nrm += v * v;
                 }
-                if (K > 1 && !(i == j && !pendiag) && alpha < 1.0) {
+                /* the group penalty does not involve the diagonal entries */
+                if (K > 1 && i != j && alpha < 1.0) {
                     nrm = sqrt(nrm);
+                    double g = (1.0 - alpha) * rho * gw[i + (size_t) m * j] / tau;
                     for (k = 0; k < K; k++) {
                         size_t id = i + (size_t) m * j + mm * k;
-                        double g = (1.0 - alpha) * rho * w[id] / tau, fac = nrm > 0.0 ? 1.0 - g / nrm : 0.0;
+                        double fac = nrm > 0.0 ? 1.0 - g / nrm : 0.0;
                         Z[id] = fac > 0.0 ? Z[id] * fac : 0.0;
                     }
                 }
@@ -123,12 +127,12 @@ done:
 }
 
 int jcg_jgl(int p, int K, const double *S, const double *f, double rho, double alpha, const double *w,
-            double *Tht, int pendiag, int maxit, double thr, int *comp, int *nit)
+            const double *gw, double *Tht, int pendiag, int maxit, double thr, int *comp, int *nit)
 {
     size_t pp = (size_t) p * p;
     int c, i, j, k, nc, conv = 0, nnit;
     int *idx = jcg_alloc(p, int);
-    nc = components(p, K, S, f, rho, alpha, w, comp);
+    nc = components(p, K, S, f, rho, alpha, w, gw, comp);
     *nit = 0;
     double *out = jcg_alloc(pp * K, double);
     for (i = 0; i < (int) (pp * K); i++) out[i] = 0.0;
@@ -146,19 +150,22 @@ int jcg_jgl(int p, int K, const double *S, const double *f, double rho, double a
         }
         size_t mm = (size_t) m * m;
         double *Sb = jcg_alloc(mm * K, double), *wb = jcg_alloc(mm * K, double), *Tb = jcg_alloc(mm * K, double);
+        double *gb = jcg_alloc(mm, double);
+        for (j = 0; j < m; j++)
+            for (i = 0; i < m; i++) gb[i + (size_t) m * j] = gw[idx[i] + (size_t) p * idx[j]];
         for (k = 0; k < K; k++)
             for (j = 0; j < m; j++)
                 for (i = 0; i < m; i++) {
                     size_t ib = i + (size_t) m * j + mm * k, id = idx[i] + (size_t) p * idx[j] + pp * k;
                     Sb[ib] = S[id]; wb[ib] = w[id]; Tb[ib] = Tht[id];
                 }
-        int cc = admm_block(m, K, Sb, f, rho, alpha, wb, Tb, pendiag, maxit, thr, &nnit);
+        int cc = admm_block(m, K, Sb, f, rho, alpha, wb, gb, Tb, pendiag, maxit, thr, &nnit);
         if (cc > conv) conv = cc;
         *nit += nnit;
         for (k = 0; k < K; k++)
             for (j = 0; j < m; j++)
                 for (i = 0; i < m; i++) out[idx[i] + (size_t) p * idx[j] + pp * k] = Tb[i + (size_t) m * j + mm * k];
-        jcg_free(Sb); jcg_free(wb); jcg_free(Tb);
+        jcg_free(Sb); jcg_free(wb); jcg_free(Tb); jcg_free(gb);
     }
     for (i = 0; i < (int) (pp * K); i++) Tht[i] = out[i];
     jcg_free(idx); jcg_free(out);

@@ -186,30 +186,18 @@ marginal_censored <- function(Z, R, lo, up, maxit = 1e4, thr = 1e-4) {
 is.datajcggm <- function(x) inherits(x, "datajcggm")
 
 #' @export
-dim.datajcggm <- function(x) {
-  n <- vapply(x$Y, nrow, 1L)
-  matrix(c(n, rep(ncol(x$Y[[1L]]), length(n)), rep(if (is.null(x$X)) 0L else ncol(x$X[[1L]]), length(n))),
-         ncol = 3L, dimnames = list(x$classes, c("n", "p", "q")))
-}
-
-#' @export
-dimnames.datajcggm <- function(x) {
-  list(classes = x$classes, Y = colnames(x$Y[[1L]]), X = if (!is.null(x$X)) colnames(x$X[[1L]]))
-}
-
-#' @export
 nobs.datajcggm <- function(object, ...) vapply(object$Y, nrow, 1L)
 
 #' @export
 print.datajcggm <- function(x, n = 6L, digits = 3L, ...) {
-  dm <- dim(x)
-  cat("Dataset of class", sQuote("datajcggm"), "with", nrow(dm), "classes,",
-      dm[1L, "p"], "responses and", dm[1L, "q"], "predictors\n")
-  for (k in seq_len(nrow(dm))) {
-    cat("\nClass ", sQuote(x$classes[k]), " (n = ", dm[k, "n"], ")\n", sep = "")
+  nk <- nobs(x)
+  cat("Dataset of class", sQuote("datajcggm"), "with", length(nk), "classes,",
+      nresp(x), "responses and", npred(x), "predictors\n")
+  for (k in seq_along(nk)) {
+    cat("\nClass ", sQuote(x$classes[k]), " (n = ", nk[k], ")\n", sep = "")
     Zc <- format_censored(x, k, digits)
     print(utils::head(Zc, n), quote = FALSE, right = TRUE)
-    if (dm[k, "n"] > n) cat("# ...", dm[k, "n"] - n, "more rows\n")
+    if (nk[k] > n) cat("# ...", nk[k] - n, "more rows\n")
   }
   cat("\n'+' right censored, '-' left censored, NA missing\n")
   invisible(x)

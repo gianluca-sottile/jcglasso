@@ -25,22 +25,24 @@ k_estep <- function(Z, R, psi, Xi, lo, up, zlo, zup, pat = make_patterns(R)) {
   } else estep_R(Z, R, psi, Xi, lo, up, zlo, zup, pat)
 }
 
-k_apg <- function(B, Sxx, Sxy, Tht, f, lambda, alpha, w, maxit, thr) {
+k_apg <- function(B, Sxx, Sxy, Tht, f, lambda, alpha, w, gw, maxit, thr) {
   if (use_C()) {
-    out <- .Call(C_apg_B, B, Sxx, Sxy, Tht, as.double(f), as.double(lambda), as.double(alpha), w,
+    storage.mode(B) <- storage.mode(w) <- storage.mode(gw) <- "double"
+    out <- .Call(C_apg_B, B, Sxx, Sxy, Tht, as.double(f), as.double(lambda), as.double(alpha), w, gw,
                  as.integer(maxit), as.double(thr))
     names(out) <- c("B", "nit", "conv")
     dim(out$B) <- dim(B)
     out
-  } else apg_B_R(B, Sxx, Sxy, Tht, f, lambda, alpha, w, maxit, thr)
+  } else apg_B_R(B, Sxx, Sxy, Tht, f, lambda, alpha, w, maxit, thr, gw)
 }
 
-k_jgl <- function(S, f, rho, alpha, w, Tht, pendiag, maxit, thr) {
+k_jgl <- function(S, f, rho, alpha, w, gw, Tht, pendiag, maxit, thr) {
   if (use_C()) {
-    out <- .Call(C_jgl, S, as.double(f), as.double(rho), as.double(alpha), w, Tht, as.integer(pendiag),
+    storage.mode(S) <- storage.mode(w) <- storage.mode(gw) <- storage.mode(Tht) <- "double"
+    out <- .Call(C_jgl, S, as.double(f), as.double(rho), as.double(alpha), w, gw, Tht, as.integer(pendiag),
                  as.integer(maxit), as.double(thr))
     names(out) <- c("Tht", "comp", "nit", "conv")
     dim(out$Tht) <- dim(S)
     out
-  } else jgl_R(S, f, rho, alpha, w, Tht, pendiag, maxit, thr)
+  } else jgl_R(S, f, rho, alpha, w, Tht, pendiag, maxit, thr, gw)
 }

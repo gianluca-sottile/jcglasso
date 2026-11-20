@@ -2,17 +2,25 @@
 # code and as a fallback). Notation: K classes, q predictors, p responses,
 # f = class weights n_k / n.
 
+# Group weights: for each entry, the mean of the finite weights across the classes
+# (structural zeros, i.e. weights >= BIG, are excluded; they are enforced by the lasso part).
+group_weights <- function(w, big = 1e300) {
+  W <- w; W[W >= big] <- NA
+  gw <- apply(W, c(1L, 2L), mean, na.rm = TRUE)
+  gw[is.na(gw)] <- big
+  gw
+}
+
 # Sparse group lasso proximal operator on an array x (q x p x K): element-wise soft
 # thresholding with thresholds a * w, followed by group shrinkage of each (h, j) group
-# across the K classes with thresholds g * w.
-prox_sgl_R <- function(x, a, g, w) {
+# across the K classes with thresholds g * gw (gw: matrix of group weights).
+prox_sgl_R <- function(x, a, g, w, gw) {
   x <- sign(x) * pmax(abs(x) - a * w, 0)
   if (dim(x)[3L] > 1L && any(g > 0)) {
     nrm <- sqrt(apply(x^2, c(1L, 2L), sum))
-    nrm3 <- array(nrm, dim(x))
-    fac <- pmax(1 - g * w / pmax(nrm3, .Machine$double.xmin), 0)
-    fac[nrm3 == 0] <- 0
-    x <- x * fac
+    fac <- pmax(1 - g * gw / pmax(nrm, .Machine$double.xmin), 0)
+    fac[nrm == 0] <- 0
+    x <- x * array(fac, dim(x))
   }
   x
 }
@@ -32,13 +40,13 @@ obj_B_R <- function(B, Sxx, Sxy, Tht, f, lambda, alpha, w) {
     val <- val + 0.5 * f[k] * sum(Tht[, , k] * (crossprod(Bk, Sxx[, , k] %*% Bk) - 2 * crossprod(Bk, Sxy[, , k])))
   }
   pen <- alpha * sum(w * abs(B))
-  if (dim(B)[3L] > 1L) pen <- pen + (1 - alpha) * sum(w[, , 1L] * sqrt(apply(B^2, c(1L, 2L), sum)))
+  if (dim(B)[3L] > 1L) pen <- pen + (1 - alpha) * sum(group_weights(w) * sqrt(apply(B^2, c(1L, 2L), sum)))
   val + lambda * pen
 }
 
 # Accelerated proximal gradient (Barzilai-Borwein initial step, adaptive restart,
 # TFOCS-style step update), as in the Fortran subroutine 'apg'.
-apg_B_R <- function(B, Sxx, Sxy, Tht, f, lambda, alpha, w, maxit = 1e4, thr = 1e-6) {
+apg_B_R <- function(B, Sxx, Sxy, Tht, f, lambda, alpha, w, maxit = 1e4, thr = 1e-6, gw = group_weights(w)) {
   x <- B; y <- x
   g <- grad_B_R(y, Sxx, Sxy, Tht, f)
   nrmg <- sqrt(sum(g^2))
@@ -48,13 +56,15 @@ apg_B_R <- function(B, Sxx, Sxy, Tht, f, lambda, alpha, w, maxit = 1e4, thr = 1e
   gh <- grad_B_R(xh, Sxx, Sxy, Tht, f)
   den <- sum((g - gh)^2)
   t <- if (den > 0) abs(sum((x - xh) * (g - gh)) / den) else 1 / nrmg
+  scale <- max(nrmg, lambda)
   theta <- 1
   conv <- 1L
   for (it in seq_len(maxit)) {
     xold <- x; yold <- y
-    x <- prox_sgl_R(y - t * g, t * lambda * alpha, t * lambda * (1 - alpha), w)
-    err <- sqrt(sum((y - x)^2)) / max(1, sqrt(sum(x^2)))
-    if (err < thr) { conv <- 0L; break }
+    x <- prox_sgl_R(y - t * g, t * lambda * alpha, t * lambda * (1 - alpha), w, gw)
+    # stopping rule on the gradient mapping, relative to the scale of the problem
+    dn <- sqrt(sum((y - x)^2))
+    if (dn / t <= thr * scale || dn <= 1e-14 * max(1, sqrt(sum(x^2)))) { conv <- 0L; break }
     theta <- 2 / (1 + sqrt(1 + 4 / theta^2))
     if (sum((y - x) * (x - xold)) > 0) { x <- xold; y <- x; theta <- 1 }
     else y <- x + (1 - theta) * (x - xold)
@@ -71,7 +81,7 @@ apg_B_R <- function(B, Sxx, Sxy, Tht, f, lambda, alpha, w, maxit = 1e4, thr = 1e
 # ADMM for the B sub-problem (Sottile et al., 2025, Section 5.2): the B-update solves
 # f_k Sxx_k B Tht_k + tau B = f_k Sxy_k Tht_k + tau (Gamma - U) with the eigen-decompositions
 # of Sxx_k and Tht_k.
-admm_B_R <- function(B, Sxx, Sxy, Tht, f, lambda, alpha, w, tau = 2, maxit = 1e4, thr = 1e-6) {
+admm_B_R <- function(B, Sxx, Sxy, Tht, f, lambda, alpha, w, tau = 2, maxit = 1e4, thr = 1e-6, gw = group_weights(w)) {
   K <- length(f)
   ex <- lapply(seq_len(K), function(k) eigen(Sxx[, , k], symmetric = TRUE))
   et <- lapply(seq_len(K), function(k) eigen(Tht[, , k], symmetric = TRUE))
@@ -86,7 +96,7 @@ admm_B_R <- function(B, Sxx, Sxy, Tht, f, lambda, alpha, w, tau = 2, maxit = 1e4
       B[, , k] <- Vx %*% (rhs / (f[k] * outer(ex[[k]]$values, et[[k]]$values) + tau)) %*% t(Vt)
     }
     Gold <- G
-    G <- prox_sgl_R(B + U, lambda * alpha / tau, lambda * (1 - alpha) / tau, w)
+    G <- prox_sgl_R(B + U, lambda * alpha / tau, lambda * (1 - alpha) / tau, w, gw)
     U <- U + B - G
     r <- sqrt(sum((B - G)^2)); s <- tau * sqrt(sum((G - Gold)^2))
     if (r <= thr * max(1, sqrt(sum(G^2))) && s <= thr * max(1, tau * sqrt(sum(U^2)))) { conv <- 0L; break }
@@ -96,17 +106,17 @@ admm_B_R <- function(B, Sxx, Sxy, Tht, f, lambda, alpha, w, tau = 2, maxit = 1e4
 
 # Joint graphical lasso with group penalty (Danaher et al., 2014):
 #   min sum_k f_k (tr(S_k Tht_k) - log det Tht_k)
-#       + rho * [alpha sum_k sum_{i != j} w_ijk |tht_ijk| + (1 - alpha) sum_{i != j} w_ij1 (sum_k tht_ijk^2)^(1/2)]
+#       + rho * [alpha sum_k sum_{i != j} w_ijk |tht_ijk| + (1 - alpha) sum_{i != j} gw_ij (sum_k tht_ijk^2)^(1/2)]
 # solved by ADMM with adaptive penalty parameter; diagonal entries unpenalized unless
 # 'pendiag = TRUE' (then they are penalized with the lasso part only).
 # Before the ADMM, the variables are split into connected components (Danaher et al.,
 # 2014, Theorem 2): i and j are disconnected if || (f_k |S_ijk| - alpha rho w_ijk)_+ ||_2 <=
-# (1 - alpha) rho w_ij.
-jgl_components_R <- function(S, f, rho, alpha, w) {
+# (1 - alpha) rho gw_ij.
+jgl_components_R <- function(S, f, rho, alpha, w, gw) {
   p <- dim(S)[1L]; K <- dim(S)[3L]
   A <- matrix(0, p, p)
   for (k in seq_len(K)) A <- A + pmax(f[k] * abs(S[, , k]) - alpha * rho * w[, , k], 0)^2
-  adj <- sqrt(A) > (1 - alpha) * rho * w[, , 1L]
+  adj <- sqrt(A) > (1 - alpha) * rho * gw
   diag(adj) <- FALSE
   comp <- integer(p); nc <- 0L
   for (v in seq_len(p)) if (comp[v] == 0L) {
@@ -120,7 +130,7 @@ jgl_components_R <- function(S, f, rho, alpha, w) {
   comp
 }
 
-jgl_admm_block_R <- function(S, f, rho, alpha, w, Tht, pendiag = FALSE, maxit = 1e4, thr = 1e-5, tau = 2) {
+jgl_admm_block_R <- function(S, f, rho, alpha, w, gw, Tht, pendiag = FALSE, maxit = 1e4, thr = 1e-5, tau = 2) {
   p <- dim(S)[1L]; K <- dim(S)[3L]
   Z <- Tht; U <- 0 * Tht
   offd <- !diag(p)
@@ -134,9 +144,9 @@ jgl_admm_block_R <- function(S, f, rho, alpha, w, Tht, pendiag = FALSE, maxit = 
     }
     A <- Tht + U / tau
     lam1 <- alpha * rho * w / tau
-    lam2 <- (1 - alpha) * rho * w / tau
-    if (!pendiag) for (k in seq_len(K)) { diag(lam1[, , k]) <- 0; diag(lam2[, , k]) <- 0 }
-    Z <- prox_sgl_R(A, lam1, lam2, 1)
+    if (!pendiag) for (k in seq_len(K)) diag(lam1[, , k]) <- 0
+    gw0 <- gw; diag(gw0) <- 0           # the group penalty does not involve the diagonal
+    Z <- prox_sgl_R(A, lam1, (1 - alpha) * rho / tau, 1, gw0)
     U <- U + tau * (Tht - Z)
     r <- sum(f * sapply(seq_len(K), function(k) sqrt(sum((Tht[, , k] - Z[, , k])^2))))
     s <- sum(f * sapply(seq_len(K), function(k) sqrt(sum((tau * (Z[, , k] - Zold[, , k]))^2))))
@@ -148,9 +158,9 @@ jgl_admm_block_R <- function(S, f, rho, alpha, w, Tht, pendiag = FALSE, maxit = 
   list(Tht = Z, nit = it, conv = conv)
 }
 
-jgl_R <- function(S, f, rho, alpha, w, Tht, pendiag = FALSE, maxit = 1e4, thr = 1e-5) {
+jgl_R <- function(S, f, rho, alpha, w, Tht, pendiag = FALSE, maxit = 1e4, thr = 1e-5, gw = group_weights(w)) {
   p <- dim(S)[1L]; K <- dim(S)[3L]
-  comp <- jgl_components_R(S, f, rho, alpha, w)
+  comp <- jgl_components_R(S, f, rho, alpha, w, gw)
   out <- array(0, dim(S), dimnames(S))
   nit <- 0L; conv <- 0L
   for (cc in unique(comp)) {
@@ -162,7 +172,7 @@ jgl_R <- function(S, f, rho, alpha, w, Tht, pendiag = FALSE, maxit = 1e4, thr = 
       }
     } else {
       r <- jgl_admm_block_R(S[id, id, , drop = FALSE], f, rho, alpha, w[id, id, , drop = FALSE],
-                            Tht[id, id, , drop = FALSE], pendiag, maxit, thr)
+                            gw[id, id, drop = FALSE], Tht[id, id, , drop = FALSE], pendiag, maxit, thr)
       out[id, id, ] <- r$Tht
       nit <- nit + r$nit; conv <- max(conv, r$conv)
     }

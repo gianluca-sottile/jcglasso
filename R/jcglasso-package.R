@@ -13,7 +13,10 @@
 #' selection), [jcggm()] (maximum likelihood refit), [to_graph()] (graphs) and
 #' [rjcggm()] (simulation). The model with `K = 1` is the conditional graphical
 #' lasso with censored and missing values of package 'cglasso' (Augugliaro et al.,
-#' 2023).
+#' 2023). Functions with the same names in the two packages (e.g., [getMatrix()],
+#' [QFun()], [to_graph()]) are S3 generics in 'jcglasso' whose default methods call
+#' the functions of 'cglasso': to use both packages, attach 'jcglasso' after
+#' 'cglasso'.
 #'
 #' @references Sottile, G., Augugliaro, L., Vinciotti, V., Arancio, W. and
 #'   Coronnello, C. (2025). Sparse inference of the human haematopoietic system

@@ -87,7 +87,8 @@ dfs <- function(object, joint) {
 support_key <- function(object, h, o, joint) {
   s <- as.integer(object$Tht[, , , h, o, drop = FALSE] != 0)
   if (object$npred > 0L) s <- c(s, as.integer(object$B[-1L, , , h, o, drop = FALSE] != 0))
-  if (joint) s <- c(s, as.integer(object$Omega[, , , h, o, drop = FALSE] != 0))
+  # the support of Omega matters also for the conditional model (through the E-step)
+  if (object$npred > 0L) s <- c(s, as.integer(object$Omega[, , , h, o, drop = FALSE] != 0))
   paste(s, collapse = "")
 }
 
@@ -108,13 +109,22 @@ print.QFun <- function(x, digits = 3L, ...) {
 #' 2025, Section 6).
 #'
 #' @param object an object of class `"jcglasso"`.
-#' @param k the penalty per degree of freedom (`2` for the AIC).
+#' @param k the penalty per degree of freedom (`2` for the AIC), a number or a
+#'   vector with one value for each class.
 #' @param g the parameter of the extended BIC, in \eqn{[0, 1]}; `g = 0` gives the
 #'   BIC.
 #' @param type the extended BIC: `"FD"` (Foygel and Drton, 2010, penalty
 #'   \eqn{\log n_k + 4 g \log p}) or `"CC"` (Chen and Chen, 2008, penalty
 #'   \eqn{\log n_k + 2 g \log q}).
 #' @param mle,part see [QFun()].
+#' @details With \eqn{Q_k} and \eqn{df_k} the Q-function and the degrees of
+#'   freedom of class `k` (see [QFun()]), the criteria are
+#'   \eqn{\sum_k \{-2 Q_k + c_k df_k\}}, with \eqn{c_k = k} for the AIC,
+#'   \eqn{c_k = \log n_k} for the BIC and \eqn{c_k = \log n_k + 4 g \log p} or
+#'   \eqn{\log n_k + 2 g \log q} for the extended BIC. Sottile et al. (2025,
+#'   eq. 6.22) write the penalty of the BIC as \eqn{df \sum_k \log n_k}, with
+#'   \eqn{df} the total number of parameters: with equal sample sizes it is `K`
+#'   times the class-specific penalty used here (and in the code of the paper).
 #' @param Qfun an optional object of class `"QFun"` (to avoid recomputing it).
 #' @param ... further arguments passed to [QFun()].
 #' @return An object of class `"GoF"`: a list with the matrix `value_gof`

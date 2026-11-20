@@ -2,10 +2,11 @@
  *
  *   min_B  (1/2) sum_k f_k tr(Tht_k (B_k' Sxx_k B_k - 2 B_k' Sxy_k)) + lambda * SGL(B)
  *
- * SGL(B) = alpha sum_k sum_{hj} w_hjk |b_hjk| + (1 - alpha) sum_{hj} (sum_k (w_hjk-weighted) b_hjk^2)^(1/2)
+ * SGL(B) = alpha sum_k sum_{hj} w_hjk |b_hjk| + (1 - alpha) sum_{hj} gw_hj (sum_k b_hjk^2)^(1/2)
  * (sparse group lasso across the K classes). Barzilai-Borwein initial step, adaptive
  * restart and TFOCS-style step-size update (as in the Fortran subroutine 'apg' of the
- * development version of 'cglasso'). B, Sxy, w: q x p x K; Sxx: q x q x K; Tht: p x p x K.
+ * development version of 'cglasso'). The algorithm stops when the norm of the gradient
+ * mapping is smaller than thr times the norm of the initial gradient (or lambda). B, Sxy, w: q x p x K; Sxx: q x q x K; Tht: p x p x K.
  * Returns 0 (converged) or 1 (maximum number of iterations). */
 #include "jcglasso.h"
 
@@ -26,7 +27,7 @@ static void grad_B(int q, int p, int K, const double *B, const double *Sxx, cons
     }
 }
 
-static void prox_sgl(int q, int p, int K, double *x, double a, double g, const double *w)
+static void prox_sgl(int q, int p, int K, double *x, double a, double g, const double *w, const double *gw)
 {
     int i, k, qp = q * p;
     for (i = 0; i < qp * K; i++) {
@@ -39,7 +40,7 @@ static void prox_sgl(int q, int p, int K, double *x, double a, double g, const d
             for (k = 0; k < K; k++) nrm += x[i + (size_t) qp * k] * x[i + (size_t) qp * k];
             nrm = sqrt(nrm);
             for (k = 0; k < K; k++) {
-                double fac = nrm > 0.0 ? 1.0 - g * w[i + (size_t) qp * k] / nrm : 0.0;
+                double fac = nrm > 0.0 ? 1.0 - g * gw[i] / nrm : 0.0;
                 x[i + (size_t) qp * k] = fac > 0.0 ? x[i + (size_t) qp * k] * fac : 0.0;
             }
         }
@@ -47,12 +48,13 @@ static void prox_sgl(int q, int p, int K, double *x, double a, double g, const d
 }
 
 int jcg_apg_B(int q, int p, int K, double *B, const double *Sxx, const double *Sxy, const double *Tht,
-              const double *f, double lambda, double alpha, const double *w, int maxit, double thr, int *nit)
+              const double *f, double lambda, double alpha, const double *w, const double *gw, int maxit, double thr,
+              int *nit)
 {
     int i, it, N = q * p * K, conv = 1;
     double *x = B, *y = jcg_alloc(N, double), *g = jcg_alloc(N, double), *xold = jcg_alloc(N, double);
     double *yold = jcg_alloc(N, double), *gold = jcg_alloc(N, double), *tmp = jcg_alloc(q * p, double);
-    double t, theta = 1.0, nrmg = 0.0, a1, a2;
+    double t, theta = 1.0, nrmg = 0.0, a1, a2, scale;
 
     *nit = 0;
     for (i = 0; i < N; i++) y[i] = x[i];
@@ -60,6 +62,8 @@ int jcg_apg_B(int q, int p, int K, double *B, const double *Sxx, const double *S
     for (i = 0; i < N; i++) nrmg += g[i] * g[i];
     nrmg = sqrt(nrmg);
     if (nrmg == 0.0) { conv = 0; goto done; }
+    /* scale of the stopping rule: norm of the initial gradient (or lambda) */
+    scale = nrmg > lambda ? nrmg : lambda;
     /* Barzilai-Borwein initial step */
     t = 1.0 / nrmg;
     for (i = 0; i < N; i++) xold[i] = x[i] - t * g[i];
@@ -72,10 +76,14 @@ int jcg_apg_B(int q, int p, int K, double *B, const double *Sxx, const double *S
         jcg_interrupt();
         double num = 0.0, den = 0.0, nx = 0.0, prod = 0.0;
         for (i = 0; i < N; i++) { xold[i] = x[i]; yold[i] = y[i]; x[i] = y[i] - t * g[i]; }
-        prox_sgl(q, p, K, x, t * lambda * alpha, t * lambda * (1.0 - alpha), w);
+        prox_sgl(q, p, K, x, t * lambda * alpha, t * lambda * (1.0 - alpha), w, gw);
         for (i = 0; i < N; i++) { double dd = y[i] - x[i]; num += dd * dd; nx += x[i] * x[i]; }
         *nit = it;
-        if (sqrt(num) / (sqrt(nx) > 1.0 ? sqrt(nx) : 1.0) < thr) { conv = 0; break; }
+        /* stopping rule on the gradient mapping (y - x) / t, relative to the scale of the
+         * problem, or no progress at machine precision */
+        if (sqrt(num) / t <= thr * scale || sqrt(num) <= 1e-14 * (sqrt(nx) > 1.0 ? sqrt(nx) : 1.0)) {
+            conv = 0; break;
+        }
         theta = 2.0 / (1.0 + sqrt(1.0 + 4.0 / (theta * theta)));
         for (i = 0; i < N; i++) prod += (y[i] - x[i]) * (x[i] - xold[i]);
         if (prod > 0.0) {                        /* adaptive restart */
