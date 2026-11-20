@@ -72,11 +72,13 @@ export(rowNames)
 export(select_jcglasso)
 export(to_graph)
 export(upper)
-importFrom(stats,AIC)
-importFrom(stats,BIC)
-importFrom(stats,coef)
-importFrom(stats,fitted)
-importFrom(stats,nobs)
-importFrom(stats,predict)
-importFrom(stats,residuals)
+importFrom(stats,
+  AIC,
+  BIC,
+  coef,
+  fitted,
+  nobs,
+  predict,
+  residuals
+)
 useDynLib(jcglasso, .registration = TRUE, .fixes = "")

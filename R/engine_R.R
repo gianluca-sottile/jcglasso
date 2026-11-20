@@ -207,8 +207,8 @@ estep_R <- function(Z, R, psi, Xi, lo, up, zlo, zup, pat = make_patterns(R)) {
       if (r[j] == 9L) {
         Zi[rows, j] <- pmin(pmax(mu, zlo[j]), zup[j]); addvar[rows, j] <- s^2
       } else {
-        if (r[j] == -1L) { z <- (lo[j] - mu) / s; lr <- dnorm(z, log = TRUE) - pnorm(z, log.p = TRUE); sg <- -1 }
-        else { z <- (up[j] - mu) / s; lr <- dnorm(z, log = TRUE) - pnorm(z, lower.tail = FALSE, log.p = TRUE); sg <- 1 }
+        if (r[j] == -1L) { z <- (lo[j] - mu) / s; lr <- stats::dnorm(z, log = TRUE) - stats::pnorm(z, log.p = TRUE); sg <- -1 }
+        else { z <- (up[j] - mu) / s; lr <- stats::dnorm(z, log = TRUE) - stats::pnorm(z, lower.tail = FALSE, log.p = TRUE); sg <- 1 }
         ratio <- exp(lr)
         tm <- mu + sg * s * ratio
         tv <- s^2 * (1 + sg * z * ratio - ratio^2)
