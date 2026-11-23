@@ -5,11 +5,13 @@ First submission of 'jcglasso', which implements the estimator of Sottile et al.
 
 ## Test environments
 
-(to be completed after the checks)
-* local macOS (aarch64), R release
+* local macOS (x86_64), R 4.6.1
+* win-builder (devel and release)
+* macOS builder (release)
 * GitHub Actions: macOS, Windows, Ubuntu (devel, release, oldrel-1)
-* win-builder (devel)
 
 ## R CMD check results
 
-0 errors | 0 warnings | 1 note (new submission)
+0 errors | 0 warnings | 1 note
+
+* This is a new submission.
